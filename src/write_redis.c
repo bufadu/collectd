@@ -40,6 +40,7 @@ struct wr_node_s
   char *host;
   int port;
   struct timeval timeout;
+  int db_id;
 
   redisContext *conn;
   pthread_mutex_t lock;
@@ -123,6 +124,16 @@ static int wr_write (const data_set_t *ds, /* {{{ */
   }
 
   assert (node->conn != NULL);
+
+  if (node->db_id) {
+    rr = redisCommand (node->conn, "SELECT %i", node->db_id);
+    if (rr == NULL) {
+      ERROR("SELECT command error. db_id:%i", node->db_id);
+      pthread_mutex_unlock (&node->lock);
+      return (-1);
+    }
+  }
+
   rr = redisCommand (node->conn, "ZADD %s %s %s", key, time, value);
   if (rr==NULL)
     WARNING("ZADD command error. key:%s", key);
@@ -169,6 +180,7 @@ static int wr_config_node (oconfig_item_t *ci) /* {{{ */
   node->timeout.tv_sec = 0;
   node->timeout.tv_usec = 1000;
   node->conn = NULL;
+  node->db_id = 0;
   pthread_mutex_init (&node->lock, /* attr = */ NULL);
 
   status = cf_util_get_string_buffer (ci, node->name, sizeof (node->name));
@@ -196,6 +208,9 @@ static int wr_config_node (oconfig_item_t *ci) /* {{{ */
     else if (strcasecmp ("Timeout", child->key) == 0) {
       status = cf_util_get_int (child, &timeout);
       if (status == 0) node->timeout.tv_usec = timeout;
+    }
+    else if (strcasecmp ("SelectDB", child->key) == 0) {
+      status = cf_util_get_int (child, &node->db_id);
     }
     else
       WARNING ("write_redis plugin: Ignoring unknown config option \"%s\".",
