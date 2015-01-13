@@ -88,10 +88,11 @@ static int wr_write (const data_set_t *ds, /* {{{ */
   }                                                                  \
 } while (0)
 
-  APPEND ("%s:", time);
+  APPEND ("%s", time);
 
   for (i = 0; i < ds->ds_num; i++)
   {
+    APPEND (":%s:", ds->ds[i].name);
     if (ds->ds[i].type == DS_TYPE_COUNTER)
       APPEND ("%llu", vl->values[i].counter);
     else if (ds->ds[i].type == DS_TYPE_GAUGE)
