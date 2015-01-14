@@ -50,6 +50,36 @@ typedef struct wr_node_s wr_node_t;
 /*
  * Functions
  */
+static int _format_data_source(char **t, char *ident, const data_set_t *ds) {
+  int i, j;
+
+  t[0] = calloc(strlen("HMSET")+1, 1);
+  strncpy(t[0], "HMSET", strlen("HMSET"));
+
+  t[1] = calloc(strlen(ident)+22, 1);
+  ssnprintf (t[1], strlen(ident)+22, "collectd/data-source/%s", ident);
+
+  for (i = 0, j = 2; i < ds->ds_num; i++, j++) {
+    t[j] = calloc(strlen(ds->ds[i].name)+1, 1);
+    strncpy(t[j++], ds->ds[i].name, strlen(ds->ds[i].name));
+
+    t[j] = calloc(strlen("absolute")+1, 1);
+
+    if (ds->ds[i].type == DS_TYPE_COUNTER)
+      strncpy(t[j], "counter", strlen("counter"));
+    else if (ds->ds[i].type == DS_TYPE_GAUGE)
+      strncpy(t[j], "gauge", strlen("gauge"));
+    else if (ds->ds[i].type == DS_TYPE_DERIVE)
+      strncpy(t[j], "derive", strlen("derive"));
+    else if (ds->ds[i].type == DS_TYPE_ABSOLUTE)
+      strncpy(t[j], "absolute", strlen("absolute"));
+    else
+      assert (12 == 42);
+  }
+
+  return (j);
+}
+
 static int wr_write (const data_set_t *ds, /* {{{ */
     const value_list_t *vl,
     user_data_t *ud)
@@ -64,6 +94,7 @@ static int wr_write (const data_set_t *ds, /* {{{ */
   int status;
   redisReply   *rr;
   int i;
+  char **redis_argv;
 
   status = FORMAT_VL (ident, sizeof (ident), vl);
   if (status != 0)
@@ -141,6 +172,24 @@ static int wr_write (const data_set_t *ds, /* {{{ */
   rr = redisCommand (node->conn, "SADD collectd/values %s", ident);
   if (rr==NULL)
     WARNING("SADD command error. ident:%s", ident);
+
+  rr = redisCommand (node->conn, "EXISTS collectd/data-source/%s", ident);
+  if (rr == NULL)
+    WARNING("EXISTS command error. ident:%s", ident);
+  else if (!rr->integer) {
+    redis_argv = calloc(128, 1);
+    i = _format_data_source(redis_argv, ident, ds);
+
+    rr = redisCommandArgv (node->conn, i, (const char**)redis_argv, NULL);
+
+    if (rr == NULL)
+      WARNING("HMSET command error. collectd/data-source/%s %s", ident, value);
+
+    for (i = 0; redis_argv[i]; i++) {
+      free(redis_argv[i]);
+    }
+    free(redis_argv);
+  }
 
   pthread_mutex_unlock (&node->lock);
 
