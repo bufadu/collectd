@@ -128,7 +128,7 @@ static int wr_write (const data_set_t *ds, /* {{{ */
     if (ds->ds[i].type == DS_TYPE_COUNTER)
       APPEND ("%llu", vl->values[i].counter);
     else if (ds->ds[i].type == DS_TYPE_GAUGE)
-      APPEND ("%g", vl->values[i].gauge);
+      APPEND ("%lf", vl->values[i].gauge);
     else if (ds->ds[i].type == DS_TYPE_DERIVE)
       APPEND ("%"PRIi64, vl->values[i].derive);
     else if (ds->ds[i].type == DS_TYPE_ABSOLUTE)
