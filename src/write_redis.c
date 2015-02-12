@@ -163,20 +163,26 @@ static int wr_write (const data_set_t *ds, /* {{{ */
       pthread_mutex_unlock (&node->lock);
       return (-1);
     }
+    freeReplyObject(rr);
   }
 
   rr = redisCommand (node->conn, "ZADD %s %s %s", key, time, value);
   if (rr==NULL)
     WARNING("ZADD command error. key:%s", key);
+  freeReplyObject(rr);
 
   rr = redisCommand (node->conn, "SADD collectd/values %s", ident);
   if (rr==NULL)
     WARNING("SADD command error. ident:%s", ident);
+  freeReplyObject(rr);
 
   rr = redisCommand (node->conn, "EXISTS collectd/data-source/%s", ident);
-  if (rr == NULL)
+  if (rr == NULL) {
     WARNING("EXISTS command error. ident:%s", ident);
+  }
   else if (!rr->integer) {
+    freeReplyObject(rr);
+
     redis_argv = calloc(128, 1);
     i = _format_data_source(redis_argv, ident, ds);
 
@@ -184,6 +190,8 @@ static int wr_write (const data_set_t *ds, /* {{{ */
 
     if (rr == NULL)
       WARNING("HMSET command error. collectd/data-source/%s %s", ident, value);
+    else
+      freeReplyObject(rr);
 
     for (i = 0; redis_argv[i]; i++) {
       free(redis_argv[i]);
