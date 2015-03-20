@@ -41,6 +41,7 @@ struct wr_node_s
   int port;
   struct timeval timeout;
   int db_id;
+  int wds;
 
   redisContext *conn;
   pthread_mutex_t lock;
@@ -169,34 +170,40 @@ static int wr_write (const data_set_t *ds, /* {{{ */
   rr = redisCommand (node->conn, "ZADD %s %s %s", key, time, value);
   if (rr==NULL)
     WARNING("ZADD command error. key:%s", key);
-  freeReplyObject(rr);
+  else
+    freeReplyObject(rr);
 
   rr = redisCommand (node->conn, "SADD collectd/values %s", ident);
   if (rr==NULL)
     WARNING("SADD command error. ident:%s", ident);
-  freeReplyObject(rr);
-
-  rr = redisCommand (node->conn, "EXISTS collectd/data-source/%s", ident);
-  if (rr == NULL) {
-    WARNING("EXISTS command error. ident:%s", ident);
-  }
-  else if (!rr->integer) {
+  else
     freeReplyObject(rr);
 
-    redis_argv = calloc(128, 1);
-    i = _format_data_source(redis_argv, ident, ds);
-
-    rr = redisCommandArgv (node->conn, i, (const char**)redis_argv, NULL);
-
-    if (rr == NULL)
-      WARNING("HMSET command error. collectd/data-source/%s %s", ident, value);
-    else
+  if (node->wds) {
+    rr = redisCommand (node->conn, "EXISTS collectd/data-source/%s", ident);
+    if (rr == NULL) {
+      WARNING("EXISTS command error. ident:%s", ident);
+    }
+    else if (!rr->integer) {
       freeReplyObject(rr);
 
-    for (i = 0; redis_argv[i]; i++) {
-      free(redis_argv[i]);
+      redis_argv = calloc(128, 1);
+      i = _format_data_source(redis_argv, ident, ds);
+
+      rr = redisCommandArgv (node->conn, i, (const char**)redis_argv, NULL);
+
+      if (rr == NULL)
+	WARNING("HMSET command error. collectd/data-source/%s %s", ident, value);
+      else
+	freeReplyObject(rr);
+
+      for (i = 0; redis_argv[i]; i++) {
+	free(redis_argv[i]);
+      }
+      free(redis_argv);
+    } else {
+      freeReplyObject(rr);
     }
-    free(redis_argv);
   }
 
   pthread_mutex_unlock (&node->lock);
@@ -238,6 +245,7 @@ static int wr_config_node (oconfig_item_t *ci) /* {{{ */
   node->timeout.tv_usec = 1000;
   node->conn = NULL;
   node->db_id = 0;
+  node->wds = 0;
   pthread_mutex_init (&node->lock, /* attr = */ NULL);
 
   status = cf_util_get_string_buffer (ci, node->name, sizeof (node->name));
@@ -268,6 +276,9 @@ static int wr_config_node (oconfig_item_t *ci) /* {{{ */
     }
     else if (strcasecmp ("SelectDB", child->key) == 0) {
       status = cf_util_get_int (child, &node->db_id);
+    }
+    else if (strcasecmp ("WithDataSource", child->key) == 0) {
+      status = cf_util_get_int (child, &node->wds);
     }
     else
       WARNING ("write_redis plugin: Ignoring unknown config option \"%s\".",
