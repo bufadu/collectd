@@ -282,6 +282,11 @@ static int swap_read_separate (void) /* {{{ */
 		if (total < used)
 			continue;
 
+		if (report_bytes) {
+		  used = used * 1024;
+		  total = total * 1024;
+		}
+
 		swap_submit_usage (path, used, total - used, NULL, NAN);
 	}
 
@@ -341,8 +346,14 @@ static int swap_read_combined (void) /* {{{ */
 	if (swap_used < 0.0)
 		return (EINVAL);
 
+	if (report_bytes) {
+	  swap_used = swap_used * 1024;
+	  swap_free = swap_free * 1024;
+	  swap_cached = swap_cached * 1024;
+	}
+
 	swap_submit_usage (NULL, swap_used, swap_free,
-			isnan (swap_cached) ? NULL : "cached", swap_cached);
+			   isnan (swap_cached) ? NULL : "cached", swap_cached);
 	return (0);
 } /* }}} int swap_read_combined */
 
