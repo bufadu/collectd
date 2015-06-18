@@ -42,6 +42,7 @@ struct wr_node_s
   struct timeval timeout;
   int db_id;
   int wds;
+  int wcv;
 
   redisContext *conn;
   pthread_mutex_t lock;
@@ -153,19 +154,24 @@ static int wr_write (const data_set_t *ds, /* {{{ */
       pthread_mutex_unlock (&node->lock);
       return (-1);
     }
+
+	if (node->db_id) {
+	  rr = redisCommand (node->conn, "SELECT %i", node->db_id);
+	  if (rr == NULL) {
+		ERROR("SELECT command error. db_id:%i", node->db_id);
+
+		// disconnecting
+		redisFree(node->conn);
+		node->conn = NULL;
+
+		pthread_mutex_unlock (&node->lock);
+		return (-1);
+	  }
+	  freeReplyObject(rr);
+	}
   }
 
   assert (node->conn != NULL);
-
-  if (node->db_id) {
-    rr = redisCommand (node->conn, "SELECT %i", node->db_id);
-    if (rr == NULL) {
-      ERROR("SELECT command error. db_id:%i", node->db_id);
-      pthread_mutex_unlock (&node->lock);
-      return (-1);
-    }
-    freeReplyObject(rr);
-  }
 
   rr = redisCommand (node->conn, "ZADD %s %s %s", key, time, value);
   if (rr==NULL)
@@ -173,11 +179,13 @@ static int wr_write (const data_set_t *ds, /* {{{ */
   else
     freeReplyObject(rr);
 
-  rr = redisCommand (node->conn, "SADD collectd/values %s", ident);
-  if (rr==NULL)
-    WARNING("SADD command error. ident:%s", ident);
-  else
-    freeReplyObject(rr);
+  if (node->wcv) {
+	rr = redisCommand (node->conn, "SADD collectd/values %s", ident);
+	if (rr==NULL)
+	  WARNING("SADD command error. ident:%s", ident);
+	else
+	  freeReplyObject(rr);
+  }
 
   if (node->wds) {
     rr = redisCommand (node->conn, "EXISTS collectd/data-source/%s", ident);
@@ -246,6 +254,7 @@ static int wr_config_node (oconfig_item_t *ci) /* {{{ */
   node->conn = NULL;
   node->db_id = 0;
   node->wds = 0;
+  node->wcv = 0;
   pthread_mutex_init (&node->lock, /* attr = */ NULL);
 
   status = cf_util_get_string_buffer (ci, node->name, sizeof (node->name));
@@ -279,6 +288,9 @@ static int wr_config_node (oconfig_item_t *ci) /* {{{ */
     }
     else if (strcasecmp ("WithDataSource", child->key) == 0) {
       status = cf_util_get_int (child, &node->wds);
+    }
+    else if (strcasecmp ("WithCollectdValues", child->key) == 0) {
+      status = cf_util_get_int (child, &node->wcv);
     }
     else
       WARNING ("write_redis plugin: Ignoring unknown config option \"%s\".",
