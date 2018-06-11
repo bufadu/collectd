@@ -76,7 +76,7 @@ typedef struct cf_value_map_s {
 typedef struct cf_global_option_s {
   const char *key;
   char *value;
-  _Bool from_cli; /* value set from CLI */
+  bool from_cli; /* value set from CLI */
   const char *def;
 } cf_global_option_t;
 
@@ -91,8 +91,8 @@ static int dispatch_block_plugin(oconfig_item_t *ci);
 /*
  * Private variables
  */
-static cf_callback_t *first_callback = NULL;
-static cf_complex_callback_t *complex_callback_head = NULL;
+static cf_callback_t *first_callback;
+static cf_complex_callback_t *complex_callback_head;
 
 static cf_value_map_t cf_value_map[] = {{"TypesDB", dispatch_value_typesdb},
                                         {"PluginDir", dispatch_value_plugindir},
@@ -190,8 +190,12 @@ static int cf_dispatch(const char *type, const char *orig_key,
 } /* int cf_dispatch */
 
 static int dispatch_global_option(const oconfig_item_t *ci) {
-  if (ci->values_num != 1)
+  if (ci->values_num != 1) {
+    ERROR("configfile: Global option `%s' needs exactly one argument.",
+          ci->key);
     return -1;
+  }
+
   if (ci->values[0].type == OCONFIG_TYPE_STRING)
     return global_option_set(ci->key, ci->values[0].value.string, 0);
   else if (ci->values[0].type == OCONFIG_TYPE_NUMBER) {
@@ -204,6 +208,8 @@ static int dispatch_global_option(const oconfig_item_t *ci) {
     else
       return global_option_set(ci->key, "false", 0);
   }
+
+  ERROR("configfile: Global option `%s' argument has unknown type.", ci->key);
 
   return -1;
 } /* int dispatch_global_option */
@@ -234,10 +240,11 @@ static int dispatch_value_typesdb(oconfig_item_t *ci) {
 static int dispatch_value_plugindir(oconfig_item_t *ci) {
   assert(strcasecmp(ci->key, "PluginDir") == 0);
 
-  if (ci->values_num != 1)
+  if (ci->values_num != 1 || ci->values[0].type != OCONFIG_TYPE_STRING) {
+    ERROR("configfile: The `PluginDir' option needs exactly one string "
+          "argument.");
     return -1;
-  if (ci->values[0].type != OCONFIG_TYPE_STRING)
-    return -1;
+  }
 
   plugin_set_dir(ci->values[0].value.string);
   return 0;
@@ -245,17 +252,18 @@ static int dispatch_value_plugindir(oconfig_item_t *ci) {
 
 static int dispatch_loadplugin(oconfig_item_t *ci) {
   const char *name;
-  _Bool global = 0;
+  bool global = false;
   plugin_ctx_t ctx = {0};
   plugin_ctx_t old_ctx;
   int ret_val;
 
   assert(strcasecmp(ci->key, "LoadPlugin") == 0);
 
-  if (ci->values_num != 1)
+  if (ci->values_num != 1 || ci->values[0].type != OCONFIG_TYPE_STRING) {
+    ERROR("configfile: The `LoadPlugin' block needs exactly one string "
+          "argument.");
     return -1;
-  if (ci->values[0].type != OCONFIG_TYPE_STRING)
-    return -1;
+  }
 
   name = ci->values[0].value.string;
   if (strcmp("libvirt", name) == 0)
@@ -333,6 +341,9 @@ static int dispatch_value(oconfig_item_t *ci) {
       break;
     }
 
+  if (ret != 0)
+    return ret;
+
   for (int i = 0; i < cf_global_options_num; i++)
     if (strcasecmp(cf_global_options[i].key, ci->key) == 0) {
       ret = dispatch_global_option(ci);
@@ -343,16 +354,18 @@ static int dispatch_value(oconfig_item_t *ci) {
 } /* int dispatch_value */
 
 static int dispatch_block_plugin(oconfig_item_t *ci) {
-  const char *name;
+  assert(strcasecmp(ci->key, "Plugin") == 0);
 
-  if (strcasecmp(ci->key, "Plugin") != 0)
+  if (ci->values_num < 1) {
+    ERROR("configfile: The `Plugin' block requires arguments.");
     return -1;
-  if (ci->values_num < 1)
+  }
+  if (ci->values[0].type != OCONFIG_TYPE_STRING) {
+    ERROR("configfile: First argument of `Plugin' block should be a string.");
     return -1;
-  if (ci->values[0].type != OCONFIG_TYPE_STRING)
-    return -1;
+  }
 
-  name = ci->values[0].value.string;
+  const char *name = ci->values[0].value.string;
   if (strcmp("libvirt", name) == 0) {
     /* TODO(octo): Remove this legacy. */
     WARNING("The \"libvirt\" plugin has been renamed to \"virt\" to avoid "
@@ -372,7 +385,7 @@ static int dispatch_block_plugin(oconfig_item_t *ci) {
     ctx.interval = cf_get_default_interval();
 
     old_ctx = plugin_set_ctx(ctx);
-    status = plugin_load(name, /* flags = */ 0);
+    status = plugin_load(name, /* flags = */ false);
     /* reset to the "global" context */
     plugin_set_ctx(old_ctx);
 
@@ -826,7 +839,7 @@ static oconfig_item_t *cf_read_generic(const char *path, const char *pattern,
 /*
  * Public functions
  */
-int global_option_set(const char *option, const char *value, _Bool from_cli) {
+int global_option_set(const char *option, const char *value, bool from_cli) {
   int i;
   DEBUG("option = %s; value = %s;", option, value);
 
@@ -1110,7 +1123,7 @@ int cf_util_get_double(const oconfig_item_t *ci, double *ret_value) /* {{{ */
   return 0;
 } /* }}} int cf_util_get_double */
 
-int cf_util_get_boolean(const oconfig_item_t *ci, _Bool *ret_bool) /* {{{ */
+int cf_util_get_boolean(const oconfig_item_t *ci, bool *ret_bool) /* {{{ */
 {
   if ((ci == NULL) || (ret_bool == NULL))
     return EINVAL;
@@ -1125,7 +1138,7 @@ int cf_util_get_boolean(const oconfig_item_t *ci, _Bool *ret_bool) /* {{{ */
 
   switch (ci->values[0].type) {
   case OCONFIG_TYPE_BOOLEAN:
-    *ret_bool = ci->values[0].value.boolean ? 1 : 0;
+    *ret_bool = ci->values[0].value.boolean ? true : false;
     break;
   case OCONFIG_TYPE_STRING:
     WARNING("cf_util_get_boolean: Using string value `%s' for boolean option "
@@ -1134,9 +1147,9 @@ int cf_util_get_boolean(const oconfig_item_t *ci, _Bool *ret_bool) /* {{{ */
             ci->values[0].value.string, ci->key);
 
     if (IS_TRUE(ci->values[0].value.string))
-      *ret_bool = 1;
+      *ret_bool = true;
     else if (IS_FALSE(ci->values[0].value.string))
-      *ret_bool = 0;
+      *ret_bool = false;
     else {
       ERROR("cf_util_get_boolean: Cannot parse string value `%s' of the `%s' "
             "option as a boolean value.",
@@ -1152,12 +1165,11 @@ int cf_util_get_boolean(const oconfig_item_t *ci, _Bool *ret_bool) /* {{{ */
 int cf_util_get_flag(const oconfig_item_t *ci, /* {{{ */
                      unsigned int *ret_value, unsigned int flag) {
   int status;
-  _Bool b;
 
   if (ret_value == NULL)
     return EINVAL;
 
-  b = 0;
+  bool b = false;
   status = cf_util_get_boolean(ci, &b);
   if (status != 0)
     return status;
